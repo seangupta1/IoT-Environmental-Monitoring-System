@@ -1,0 +1,442 @@
+{% extends "base.html" %} 
+
+{% block content %}
+<div id="alarm-overlay" class="alarm-overlay-screen"></div>
+
+<div>
+    <h1 class="title">Live Dashboard</h1>
+
+    <div class="info-grid">
+        <div class="card">
+            <h2 class="title card-header">Current Conditions</h2>
+            <p><strong>Clock:</strong> <span id="live-clock"></span></p>
+            <p><strong>Last Update:</strong> <span id="last-update"></span></p>
+            
+            <hr class="card-divider">
+            
+            <h1 class="temp-display-large">
+                <span class="temp-val">{{ current_temperature }}</span>°C
+            </h1>
+            <p class="hum-display-medium">
+                Humidity: <span class="hum-val">{{ current_humidity }}</span>%
+            </p>
+        </div>
+
+        <div class="card">
+            <h2 class="title card-header">Temperature Alarm</h2>
+            
+            <div class="flex-row">
+                <input type="number" id="alarm-threshold" step="any" placeholder="Threshold (°C)" class="form-input">
+            </div>
+            
+            <div style="margin-top: 15px; font-size: 0.9rem;">
+                <label style="cursor: pointer;">
+                    <input type="checkbox" id="alarm-sound" checked> Play Sound
+                </label>
+                <label style="margin-left: 15px; cursor: pointer;">
+                    <input type="checkbox" id="alarm-visual" checked> Flash Screen
+                </label>
+            </div>
+            
+            <div class="flex-row">
+                <button onclick="setAlarm()" class="btn-primary" style="flex: 1;">Set Alarm</button>
+                <button onclick="clearAlarm()" class="btn-danger" style="flex: 1;">Clear</button>
+            </div>
+            
+            <hr class="card-divider">
+            <p style="font-size: 0.9rem; margin: 0;"><strong>Status:</strong> <span id="alarm-status" style="color: #666;">Disabled</span></p>
+        </div>
+
+        <div class="card">
+            <h2 class="title card-header">Local Weather</h2>
+            <p style="font-size: 0.8rem; color: #666; margin: 10px 0 5px 0; line-height: 1.4;">
+                Search by City, Zipcode, or Lat, Long<br>
+                <i>(Example: 40.7128, -74.0060)</i>
+            </p>
+            
+            <div class="flex-row" style="margin-top: 5px;">
+                <input type="text" id="weather-city-input" placeholder="Enter location..." class="form-input">
+                <button onclick="searchWeather()" class="btn-primary" style="padding: 8px 15px;">Search</button>
+            </div>
+
+            <div class="flex-row-center">
+                <img id="weather-icon" src="" alt="Weather Icon" style="width: 64px; height: 64px; display: none;">
+                <div>
+                    <h3 id="weather-location" style="margin: 0; color: #004b87;">Loading...</h3>
+                    <p id="weather-desc" style="margin: 5px 0 0 0; color: #666;"></p>
+                </div>
+            </div>
+            
+            <hr class="card-divider">
+            <p><strong>Temp:</strong> <span id="weather-temp">--</span>°C / <span id="weather-temp-f">--</span>°F</p>
+            <p><strong>Humidity:</strong> <span id="weather-hum">--</span>%</p>
+            <p style="font-size: 0.8rem; color: #888; margin-top: 10px;">
+                Last API Sync: <span id="weather-time">Waiting...</span>
+            </p>
+        </div>
+    </div>
+
+    <div class="card card-wide">
+        <div class="flex-row-between">
+            
+            <h2 class="title card-header">Environmental History</h2>
+            
+            <div>
+                <label for="time-window" class="form-label">View: </label>
+                
+                <select id="time-window" class="form-input" style="padding: 5px;">
+                    <option value="all">All History (Free Zoom)</option>
+                    <option value="5">Live: Last 5 Minutes</option>
+                    <option value="15">Live: Last 15 Minutes</option>
+                    <option value="60">Live: Last 1 Hour</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="flex-row" style="gap: 20px;">
+            <div class="chart-wrapper"><canvas id="temperatureChart"></canvas></div>
+            <div class="chart-wrapper"><canvas id="humidityChart"></canvas></div>
+        </div>
+    </div>
+
+    <div class="card" style="max-width: 600px; margin: 0 auto; margin-bottom: 20px;">
+            <h2 class="title card-header">Search Records</h2>
+            
+            <form id="search-form" action="/submit-temperature-search" method="post" style="display: flex; flex-direction: column; gap: 10px;">
+                <input type="datetime-local" name="start_time" class="form-input">
+                <input type="datetime-local" name="end_time" class="form-input">
+                <input type="number" name="threshold_temperature" step="any" placeholder="Temp Threshold (°C)" class="form-input">
+                <select name="direction" class="form-input">
+                    <option value="above">Above</option>
+                    <option value="below">Below</option>
+                </select>
+            </form>
+            
+            <form id="clear-form" action="/clear-temperature-search" method="post"></form>
+
+            <div class="flex-row" style="margin-top: 10px;">
+                <button type="submit" form="search-form" class="btn-primary" style="flex: 1;">Search</button>
+                <button type="submit" form="clear-form" class="btn-danger" style="flex: 1;">Clear</button>
+            </div>
+        </div>
+</div>
+
+    {% if search_results is not none %}
+    <div class="card card-wide">
+        <h2 class="title">Search Records</h2>
+        
+        {# Only build the table if there is actually something inside the list #}
+        {% if search_results|length > 0 %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Timestamp</th>
+                        <th>Temperature</th>
+                        <th>Humidity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in search_results %}
+                    <tr>
+                        <td>{{ r.id }}</td>
+                        <td>
+                            {# Safety: Only run isoformat if the timestamp exists #}
+                            <span class="utc-table-time">
+                                {% if r.timestamp %}
+                                    {{ r.timestamp.isoformat() }}Z
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </span>
+                        </td> 
+                        <td>{{ r.temperature }} °C</td>
+                        <td>{{ r.humidity }} %</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            {# If the user searched but the DB is empty, show this friendly message #}
+            <p style="text-align: center; color: #666; padding: 20px;">
+                No records found. Try adjusting your search filters or wait for the ESP32 to upload data.
+            </p>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script> 
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script> 
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+<script>
+    // Setup live clock
+    setInterval(() => {
+        document.getElementById('live-clock').innerText = new Date().toLocaleTimeString();
+    }, 1000);
+
+    // initial update time
+    const dbTimestamp = "{% if current_timestamp %}{{ current_timestamp.isoformat() }}{% else %}{{ get_current_utc_time().isoformat() }}{% endif %}Z";
+    const localDate = new Date(dbTimestamp);
+    document.getElementById('last-update').innerText = localDate.toLocaleTimeString();
+
+    // chart data from Flask (injected as JSON-safe lists)
+    const chartLabels = {{ labels | safe }};
+    const chartTemperatures = {{ temperatures | safe }};
+    const chartHumidities = {{ humidities | safe }};
+
+    // Chart.js Zoom Options Object
+    const zoomOptions = {
+        pan: {
+            enabled: true,
+            mode: 'x',
+        },
+        zoom: {
+            wheel: { enabled: true },
+            mode: 'x',
+            // when zooming, automatically switch to "All History" so updates don't fight with user's zoom
+            onZoom: function() { document.getElementById('time-window').value = 'all'; }
+        }
+    };
+
+    const tempCoordinateData = chartLabels.map((timeStr, index) => ({
+        x: new Date(timeStr.endsWith('Z') ? timeStr : timeStr + 'Z').getTime(), 
+        y: chartTemperatures[index]
+    }));
+
+    const humCoordinateData = chartLabels.map((timeStr, index) => ({
+        x: new Date(timeStr.endsWith('Z') ? timeStr : timeStr + 'Z').getTime(), 
+        y: chartHumidities[index]
+    }));
+
+    // Create the charts
+    const tempChartObj = new Chart(document.getElementById('temperatureChart'), {
+        type: 'line',
+        data: { datasets: [{ label: 'Temperature (°C)', data: tempCoordinateData, borderColor: '#e94560', tension: 0.2, pointRadius: 2 }] },
+        options: {
+            scales: { x: { type: 'time', time: { tooltipFormat: 'PPpp' } } },
+            plugins: { zoom: zoomOptions }
+        }
+    });
+
+    const humChartObj = new Chart(document.getElementById('humidityChart'), {
+        type: 'line',
+        data: { datasets: [{ label: 'Humidity (%)', data: humCoordinateData, borderColor: '#004b87', tension: 0.2, pointRadius: 3 }] },
+        options: {
+            scales: { x: { type: 'time', time: { tooltipFormat: 'PPpp' } } },
+            plugins: { zoom: zoomOptions }
+        }
+    });
+
+    // Time Window Dropdown Logic 
+    // Listener for when the user changes the time window selection
+    document.getElementById('time-window').addEventListener('change', function() {
+    if (this.value === 'all') { 
+        // selected "All History" - remove any zoom constraints to show everything
+        delete tempChartObj.options.scales.x.min;
+        delete tempChartObj.options.scales.x.max;
+        delete humChartObj.options.scales.x.min;
+        delete humChartObj.options.scales.x.max;
+        tempChartObj.resetZoom();
+        humChartObj.resetZoom();} 
+        else {
+        // User selects a specific window (5, 15, or 60)
+            const windowMs = parseInt(this.value) * 60 * 1000;
+            const nowMs = Date.now(); 
+            const pastMs = nowMs - windowMs;
+
+        // Scale the x-axis to the new window
+        tempChartObj.options.scales.x.min = pastMs;
+        tempChartObj.options.scales.x.max = nowMs;
+        humChartObj.options.scales.x.min = pastMs;
+        humChartObj.options.scales.x.max = nowMs;
+
+        tempChartObj.update();
+        humChartObj.update();
+    }
+});
+
+    // used to ignore duplicate readings that can come in due to the 5-second polling interval
+    let lastSeenTimeMs = tempCoordinateData.length > 0 ? tempCoordinateData[tempCoordinateData.length - 1].x : 0;
+
+    setInterval(() => {
+        fetch('/api/latest-readings') 
+            .then(response => response.json()) 
+            .then(data => { 
+                if (!data.timestamp || data.timestamp === "N/A") {
+                    document.querySelector('.temp-val').innerText = "N/A";
+                    document.querySelector('.hum-val').innerText = "N/A";
+                    document.getElementById('last-update').innerText = "No Data Yet";
+                    return; // Exit the function early
+                }
+                
+                const liveTimeStr = data.timestamp.endsWith('Z') ? data.timestamp : data.timestamp + 'Z';
+                const incomingTimeMs = new Date(liveTimeStr).getTime();
+                const windowSelect = document.getElementById('time-window').value;
+
+                // This ensures the chart keeps moving forward in time even if the sensor is dead.
+                if (windowSelect !== 'all') {
+                    const windowMs = parseInt(windowSelect) * 60 * 1000;
+                    const nowMs = Date.now();
+                    tempChartObj.options.scales.x.min = nowMs - windowMs;
+                    tempChartObj.options.scales.x.max = nowMs;
+                    humChartObj.options.scales.x.min = nowMs - windowMs;
+                    humChartObj.options.scales.x.max = nowMs;
+                    tempChartObj.update('none'); 
+                    humChartObj.update('none');
+                }
+
+                // check for duplicates  
+                if (incomingTimeMs <= lastSeenTimeMs) {
+                    return; 
+                }
+                
+                lastSeenTimeMs = incomingTimeMs;
+
+                document.querySelector('.temp-val').innerText = data.temperature; 
+                document.querySelector('.hum-val').innerText = data.humidity; 
+
+                // Check alarm condition
+                if (activeAlarmThreshold !== null && data.temperature > activeAlarmThreshold) {
+                    playBeep();
+                    triggerVisualAlarm();
+                }
+                document.getElementById('last-update').innerText = new Date().toLocaleTimeString();
+                
+                // Update charts with new data point
+                tempChartObj.data.datasets[0].data.push({ x: incomingTimeMs, y: data.temperature });
+                humChartObj.data.datasets[0].data.push({ x: incomingTimeMs, y: data.humidity });
+                
+                // limit chart to last 1000 points
+                if (tempChartObj.data.labels.length > 1000) {
+                    tempChartObj.data.datasets[0].data.shift();
+                    humChartObj.data.datasets[0].data.shift();
+                }
+                
+                // Apply time window filter if user didn't select "All History"
+                if (windowSelect !== 'all') {
+                    tempChartObj.update();
+                    humChartObj.update();
+                } else { 
+                    // 'none' tells Chart.js to  add the data behind the scenes
+                    tempChartObj.update('none'); 
+                    humChartObj.update('none');
+                }
+            })
+            .catch(error => console.error('Error fetching data:', error));
+    }, 5000);
+
+    // Convert Search Table UTC times to Local Time
+    document.querySelectorAll('.utc-table-time').forEach(el => {
+        const exactTime = new Date(el.innerText);
+        el.innerText = exactTime.toLocaleString(); 
+    });
+
+    // The Weather Auto-Updater & Search
+    let currentCity = 'Kansas City'; // default city 
+
+    function updateWeather(city) {
+        // fetch weather data from our Flask API endpoint
+        // encodeURIComponent is used to safely handle spaces and special characters in city names
+        fetch(`/api/weather?city=${encodeURIComponent(city)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    console.error("Weather API Error:", data.error);
+                    document.getElementById('weather-location').innerText = "City Not Found";
+                    document.getElementById('weather-desc').innerText = "Please try another search.";
+                    document.getElementById('weather-temp').innerText = "--";
+                    document.getElementById('weather-temp-f').innerText = "--";
+                    document.getElementById('weather-hum').innerText = "--";
+                    document.getElementById('weather-icon').style.display = "none";
+                    return;
+                }
+                
+                document.getElementById('weather-location').innerText = `${data.location.name}, ${data.location.region}`;
+                document.getElementById('weather-desc').innerText = data.current.condition.text;
+                document.getElementById('weather-temp').innerText = data.current.temp_c;
+                document.getElementById('weather-temp-f').innerText = data.current.temp_f;
+                document.getElementById('weather-hum').innerText = data.current.humidity;
+                
+                // Update weather icon
+                const iconImg = document.getElementById('weather-icon');
+                iconImg.src = "https:" + data.current.condition.icon;
+                iconImg.style.display = "block";
+
+                document.getElementById('weather-time').innerText = data.current.last_updated;
+                document.getElementById('weather-city-input').value = "";
+            })
+            .catch(error => console.error('Error fetching weather:', error));
+    }
+
+    // Triggered when user clicks the search button or presses Enter in the input field
+    function searchWeather() {
+        const inputVal = document.getElementById('weather-city-input').value;
+        if (inputVal.trim() !== "") {
+            currentCity = inputVal; 
+            updateWeather(currentCity); 
+        }
+    }
+
+    updateWeather(currentCity);
+    // auto-update weather every 10 minutes
+    setInterval(() => updateWeather(currentCity), 600000);
+
+    // The Alarm System
+    let activeAlarmThreshold = null;
+    let alarmIsRinging = false;
+
+    function setAlarm() {
+        const inputVal = document.getElementById('alarm-threshold').value;
+        if (inputVal.trim() !== "") {
+            activeAlarmThreshold = parseFloat(inputVal);
+            document.getElementById('alarm-status').innerText = `Active (Triggers above ${activeAlarmThreshold}°C)`;
+            document.getElementById('alarm-status').style.color = '#004b87'; 
+        }
+    }
+
+    function clearAlarm() {
+        activeAlarmThreshold = null;
+        alarmIsRinging = false;
+        document.getElementById('alarm-threshold').value = "";
+        document.getElementById('alarm-status').innerText = "Disabled";
+        document.getElementById('alarm-status').style.color = '#666';
+        
+        // Force the screen flash to turn off if it was currently flashing
+        document.getElementById('alarm-overlay').style.display = 'none';
+    }
+
+    function playBeep() {
+        if (!document.getElementById('alarm-sound').checked) return;
+        
+        // Web Audio API to play a beep sound
+        const audioCtx = new (window.AudioContext)();
+        const oscillator = audioCtx.createOscillator(); // Create a sound source (oscillator)
+        const gainNode = audioCtx.createGain(); // Create a gain node to control volume
+        
+        oscillator.connect(gainNode); // Connect the oscillator to the gain node
+        gainNode.connect(audioCtx.destination); // Connect the gain node to the audio output (speakers)
+        
+        oscillator.type = 'square'; // Square wave for a more classic alarm sound
+        oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // 880Hz 
+        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime); // Volume
+        
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.4); // Beep for 0.4 seconds
+    }
+
+    function triggerVisualAlarm() {
+        if (!document.getElementById('alarm-visual').checked) return;
+        
+        const overlay = document.getElementById('alarm-overlay');
+        overlay.style.display = 'block';
+        
+        // Flash 
+        setTimeout(() => { overlay.style.display = 'none'; }, 500);
+    }
+</script>
+
+
+{% endblock %}
